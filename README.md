@@ -21,8 +21,8 @@
 
 在插件配置文件中可自定义以下设置：
 
-- `shutup_commands`：闭嘴指令列表，默认 `闭嘴,stop`，支持字符串或列表，多个命令用逗号或空格分隔
-- `unshutup_commands`：解除闭嘴指令列表，默认 `说话,停止闭嘴`，支持字符串或列表
+- `shutup_commands`：闭嘴指令列表，默认 `闭嘴,stop`
+- `unshutup_commands`：解除闭嘴指令列表，默认 `说话,停止闭嘴`
 - `default_duration`：默认闭嘴时长（秒），默认 `600`
 - `shutup_reply`：闭嘴时的回复消息，支持占位符 `{duration}`（禁言时长，秒）和 `{expiry_time}`（禁言结束时间），默认 `好的，我闭嘴了~`
 - `unshutup_reply`：解除闭嘴时的回复消息，支持占位符 `{duration}` 和 `{expiry_time}`，默认 `好的，我恢复说话了~`
