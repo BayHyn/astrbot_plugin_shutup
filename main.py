@@ -3,6 +3,8 @@ from astrbot.api.star import Context, Star, register
 from astrbot.api import logger
 import time
 import re
+import os
+import json
 
 @register("astrbot_plugin_shutup", "Railgun19457", "一个简单的插件，让bot闭嘴", "v1.0")
 class ShutupPlugin(Star):
@@ -21,9 +23,32 @@ class ShutupPlugin(Star):
         self.shutup_reply = config.get("shutup_reply", "好的，我闭嘴了~")
         self.unshutup_reply = config.get("unshutup_reply", "好的，我恢复说话了~")
         self.silence_map = {}
+        self.data_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "plugin_data", "astrbot_plugin_shutup")
+        self.silence_map_path = os.path.join(self.data_dir, "silence_map.json")
+        self._load_silence_map()
         logger.info(f"[ShutupPlugin] 已加载闭嘴指令: {self.shutup_cmds}")
         logger.info(f"[ShutupPlugin] 已加载解除闭嘴指令: {self.unshutup_cmds}")
         logger.info(f"[ShutupPlugin] default_duration={self.default_duration}s, shutup_reply='{self.shutup_reply}', unshutup_reply='{self.unshutup_reply}'")
+
+    def _load_silence_map(self):
+        try:
+            os.makedirs(self.data_dir, exist_ok=True)
+            if os.path.exists(self.silence_map_path):
+                with open(self.silence_map_path, "r", encoding="utf-8") as f:
+                    self.silence_map = json.load(f)
+                # json只能存str->float，确保float类型
+                self.silence_map = {k: float(v) for k, v in self.silence_map.items()}
+                logger.info(f"[ShutupPlugin] silence_map loaded from {self.silence_map_path}")
+        except Exception as e:
+            logger.warning(f"[ShutupPlugin] Failed to load silence_map: {e}")
+
+    def _save_silence_map(self):
+        try:
+            with open(self.silence_map_path, "w", encoding="utf-8") as f:
+                json.dump(self.silence_map, f)
+            logger.debug(f"[ShutupPlugin] silence_map saved to {self.silence_map_path}")
+        except Exception as e:
+            logger.warning(f"[ShutupPlugin] Failed to save silence_map: {e}")
 
     @filter.event_message_type(filter.EventMessageType.ALL)
     async def handle_message(self, event: AstrMessageEvent):
@@ -44,6 +69,7 @@ class ShutupPlugin(Star):
                     dur = self.default_duration
                 logger.info(f"[ShutupPlugin] Silence duration={dur}s")
                 self.silence_map[origin] = time.time() + dur
+                self._save_silence_map()
                 expiry_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(self.silence_map[origin]))
                 reply = self.shutup_reply.format(duration=dur, expiry_time=expiry_time)
                 yield event.plain_result(reply)
@@ -54,6 +80,7 @@ class ShutupPlugin(Star):
             if text.startswith(cmd):
                 logger.info(f"[ShutupPlugin] Removing silence for {origin}")
                 self.silence_map.pop(origin, None)
+                self._save_silence_map()
                 duration = int(time.time() - (self.silence_map.get(origin, time.time())))
                 expiry_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time()))
                 logger.debug(f"[ShutupPlugin] Unmuted state: duration={duration}s, expiry_time={expiry_time}")
@@ -73,3 +100,4 @@ class ShutupPlugin(Star):
     async def terminate(self):
         logger.info("[ShutupPlugin] terminate: clearing silence map")
         self.silence_map.clear()
+        self._save_silence_map()
