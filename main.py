@@ -1,5 +1,6 @@
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register
+import astrbot.api.message_components as Comp
 from astrbot.api import logger
 import time
 import re
@@ -11,6 +12,7 @@ class ShutupPlugin(Star):
     def __init__(self, context: Context, config):
         super().__init__(context)
         self.config = config
+        self.wake_prefix: list[str] = self.context.get_config().get("wake_prefix", [])
         # 直接获取配置项中的列表
         self.shutup_cmds = config.get("shutup_commands", ["闭嘴", "stop"])
         self.unshutup_cmds = config.get("unshutup_commands", ["说话", "停止闭嘴"])
@@ -57,6 +59,24 @@ class ShutupPlugin(Star):
         origin = event.unified_msg_origin
         logger.info(f"[ShutupPlugin] 收到来自 {origin} 的消息 '{text}'")
         logger.debug(f"[ShutupPlugin] 处理前当前silence_map: {self.silence_map}")
+
+        # 前缀模式
+        if self.require_prefix:
+            chain = event.get_messages()
+            if not chain:
+                return
+            first_seg = chain[0]
+            # 前缀触发
+            if isinstance(first_seg, Comp.Plain):
+                if not any(first_seg.text.startswith(prefix) for prefix in self.wake_prefix):
+                    return
+            # @bot触发
+            elif isinstance(first_seg, Comp.At):
+                if str(first_seg.qq) != str(event.get_self_id()):
+                    return
+            else:
+                return
+
         # shutup
         for cmd in self.shutup_cmds:
             if text.startswith(cmd):
