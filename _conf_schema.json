@@ -27,5 +27,10 @@
     "description": "解除闭嘴时的回复消息",
     "hint": "支持占位符 {duration}（禁言时长，秒）和 {expiry_time}（禁言结束时间）",
     "default": "好的，我恢复说话了~"
+  },
+  "require_prefix": {
+    "type": "bool",
+    "description": "是否需要命令前缀",
+    "default": true
   }
 }
