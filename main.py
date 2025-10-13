@@ -9,8 +9,11 @@ import json
 from datetime import datetime
 
 
-@register("astrbot_plugin_shutup", "Railgun19457", "一个简单的插件，让bot闭嘴", "v1.2")
+@register("astrbot_plugin_shutup", "Railgun19457", "一个简单的插件，让bot闭嘴", "v1.3")
 class ShutupPlugin(Star):
+    # 时间单位转换（秒）
+    TIME_UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+
     def __init__(self, context: Context, config):
         super().__init__(context)
         self.config = config
@@ -64,27 +67,24 @@ class ShutupPlugin(Star):
             list[tuple[str, str]]: 时间范围列表，每个元素是 (开始时间, 结束时间)
         """
         time_ranges = []
-        lines = time_text.strip().split("\n")
 
-        for line in lines:
+        for line in time_text.strip().split("\n"):
             line = line.strip()
-            if not line or line.startswith("#"):  # 跳过空行和注释
+            if not line or line.startswith("#"):
                 continue
 
-            # 匹配 HH:MM-HH:MM 格式
             match = re.match(r"^(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})$", line)
-            if match:
-                start_time = match.group(1)
-                end_time = match.group(2)
-                # 验证时间格式
-                try:
-                    datetime.strptime(start_time, "%H:%M")
-                    datetime.strptime(end_time, "%H:%M")
-                    time_ranges.append((start_time, end_time))
-                except ValueError:
-                    logger.warning(f"[Shutup] ⚠️ 无效的时间格式: {line}")
-            else:
+            if not match:
                 logger.warning(f"[Shutup] ⚠️ 无法解析时间范围: {line}")
+                continue
+
+            start_time, end_time = match.groups()
+            try:
+                datetime.strptime(start_time, "%H:%M")
+                datetime.strptime(end_time, "%H:%M")
+                time_ranges.append((start_time, end_time))
+            except ValueError:
+                logger.warning(f"[Shutup] ⚠️ 无效的时间格式: {line}")
 
         if not time_ranges and self.scheduled_enabled:
             logger.warning("[Shutup] ⚠️ 未配置有效的定时时间段，定时闭嘴将不会生效")
@@ -112,40 +112,28 @@ class ShutupPlugin(Star):
             logger.warning(f"[Shutup] ⚠️ 保存禁言记录失败: {e}")
 
     def _is_in_scheduled_time(self) -> bool:
-        """检查当前时间是否在定时闭嘴时间段内
-
-        Returns:
-            bool: True 表示在定时闭嘴时间段内
-        """
+        """检查当前时间是否在定时闭嘴时间段内"""
         if not self.scheduled_enabled or not self.scheduled_time_ranges:
             return False
 
-        try:
-            now = datetime.now()
-            current_time = now.hour * 60 + now.minute  # 转换为分钟数
+        current_minutes = datetime.now().hour * 60 + datetime.now().minute
 
-            # 检查是否在任意一个时间段内
-            for start_time_str, end_time_str in self.scheduled_time_ranges:
-                # 解析开始和结束时间
-                start_h, start_m = map(int, start_time_str.split(":"))
-                end_h, end_m = map(int, end_time_str.split(":"))
-                start_minutes = start_h * 60 + start_m
-                end_minutes = end_h * 60 + end_m
+        for start_time_str, end_time_str in self.scheduled_time_ranges:
+            start_h, start_m = map(int, start_time_str.split(":"))
+            end_h, end_m = map(int, end_time_str.split(":"))
+            start_minutes = start_h * 60 + start_m
+            end_minutes = end_h * 60 + end_m
 
-                # 处理跨天的情况（例如 23:00 - 07:00）
-                if start_minutes <= end_minutes:
-                    # 不跨天的情况（例如 08:00 - 18:00）
-                    if start_minutes <= current_time <= end_minutes:
-                        return True
-                else:
-                    # 跨天的情况（例如 23:00 - 07:00）
-                    if current_time >= start_minutes or current_time <= end_minutes:
-                        return True
+            # 跨天：23:00-07:00 或 不跨天：08:00-18:00
+            in_range = (
+                start_minutes <= current_minutes <= end_minutes
+                if start_minutes <= end_minutes
+                else current_minutes >= start_minutes or current_minutes <= end_minutes
+            )
+            if in_range:
+                return True
 
-            return False
-        except Exception as e:
-            logger.warning(f"[Shutup] ⚠️ 检查定时配置失败: {e}")
-            return False
+        return False
 
     def _check_prefix(self, event: AstrMessageEvent) -> bool:
         """检查消息是否满足前缀要求
@@ -175,97 +163,93 @@ class ShutupPlugin(Star):
         text = event.get_message_str().strip()
         origin = event.unified_msg_origin
 
-        # 1. 首先检查是否是控制指令（闭嘴/说话）
-        is_control_cmd = False
-        for cmd in self.shutup_cmds + self.unshutup_cmds:
-            if text.startswith(cmd):
-                is_control_cmd = True
-                break
+        # 1. 检查是否是控制指令
+        is_shutup_cmd = any(text.startswith(cmd) for cmd in self.shutup_cmds)
+        is_unshutup_cmd = any(text.startswith(cmd) for cmd in self.unshutup_cmds)
 
-        # 2. 如果是控制指令，需要检查前缀要求
-        if is_control_cmd:
+        # 2. 处理控制指令（需要检查前缀）
+        if is_shutup_cmd or is_unshutup_cmd:
             if not self._check_prefix(event):
                 return
 
-            # 3. 处理闭嘴指令
-            for cmd in self.shutup_cmds:
-                if text.startswith(cmd):
-                    m = re.match(rf"^{re.escape(cmd)}\s*(\d+)([smhd])?", text)
-                    if m:
-                        val = int(m.group(1))
-                        unit = m.group(2) or "s"
-                        dur = val * {"s": 1, "m": 60, "h": 3600, "d": 86400}.get(
-                            unit, 1
-                        )
-                    else:
-                        dur = self.default_duration
+            if is_shutup_cmd:
+                yield event.plain_result(
+                    await self._handle_shutup_command(text, origin)
+                )
+                event.stop_event()
+                return
 
-                    self.silence_map[origin] = time.time() + dur
-                    self._save_silence_map()
-                    expiry_time = time.strftime(
-                        "%Y-%m-%d %H:%M:%S", time.localtime(self.silence_map[origin])
-                    )
-                    logger.info(
-                        f"[Shutup] 🔇 已禁言 | 时长: {dur}s | 到期: {expiry_time}"
-                    )
-                    reply = self.shutup_reply.format(
-                        duration=dur, expiry_time=expiry_time
-                    )
-                    yield event.plain_result(reply)
-                    event.stop_event()
-                    return
+            if is_unshutup_cmd:
+                yield event.plain_result(await self._handle_unshutup_command(origin))
+                event.stop_event()
+                return
 
-            # 4. 处理解除闭嘴指令
-            for cmd in self.unshutup_cmds:
-                if text.startswith(cmd):
-                    # 先获取旧的过期时间用于计算已禁言时长
-                    old_expiry = self.silence_map.get(origin)
-                    if old_expiry:
-                        # 计算实际禁言了多长时间
-                        duration = int(
-                            time.time() - (old_expiry - self.default_duration)
-                        )
-                    else:
-                        duration = 0
-
-                    self.silence_map.pop(origin, None)
-                    self._save_silence_map()
-                    expiry_time = time.strftime(
-                        "%Y-%m-%d %H:%M:%S", time.localtime(time.time())
-                    )
-                    logger.info(f"[Shutup] 🔊 已解除禁言 | 已禁言: {duration}s")
-                    reply = self.unshutup_reply.format(
-                        duration=duration, expiry_time=expiry_time
-                    )
-                    yield event.plain_result(reply)
-                    event.stop_event()
-                    return
-
-        # 5. 检查定时闭嘴（在检查禁言状态之前，但控制指令可以绕过）
+        # 3. 检查定时闭嘴
         if self._is_in_scheduled_time():
             logger.info("[Shutup] ⏰ 定时闭嘴生效中")
             event.should_call_llm(False)
             event.stop_event()
             return
 
-        # 6. 如果不是控制指令，检查是否在禁言状态
+        # 4. 检查手动禁言状态
         expiry = self.silence_map.get(origin)
         if expiry:
-            current_time = time.time()
-            if current_time < expiry:
-                # 仍在禁言期内，拦截非控制指令的消息
-                remaining = int(expiry - current_time)
+            if time.time() < expiry:
+                remaining = int(expiry - time.time())
                 logger.info(
-                    f"[Shutup] 🚫 消息已拦截 | 来源: {origin} | 剩余: {remaining}s"
+                    f"[Shutup] 🔇 消息已拦截 | 来源: {origin} | 剩余: {remaining}s"
                 )
                 event.should_call_llm(False)
                 event.stop_event()
-                return
             else:
                 # 禁言已过期，自动清理
                 logger.info("[Shutup] ⏰ 禁言已自动过期")
                 self.silence_map.pop(origin, None)
                 self._save_silence_map()
+
+    async def _handle_shutup_command(self, text: str, origin: str) -> str:
+        """处理闭嘴指令"""
+        # 解析时长
+        for cmd in self.shutup_cmds:
+            if text.startswith(cmd):
+                match = re.match(rf"^{re.escape(cmd)}\s*(\d+)([smhd])?", text)
+                if match:
+                    val = int(match.group(1))
+                    unit = match.group(2) or "s"
+                    duration = val * self.TIME_UNITS.get(unit, 1)
+                else:
+                    duration = self.default_duration
+                break
+
+        # 设置禁言
+        self.silence_map[origin] = time.time() + duration
+        self._save_silence_map()
+
+        expiry_time = time.strftime(
+            "%Y-%m-%d %H:%M:%S", time.localtime(self.silence_map[origin])
+        )
+        logger.info(f"[Shutup] 🔇 已禁言 | 时长: {duration}s | 到期: {expiry_time}")
+
+        return self.shutup_reply.format(duration=duration, expiry_time=expiry_time)
+
+    async def _handle_unshutup_command(self, origin: str) -> str:
+        """处理解除闭嘴指令"""
+        # 计算已禁言时长
+        old_expiry = self.silence_map.get(origin)
+        if old_expiry:
+            now = time.time()
+            duration = int(max(0, now - (old_expiry - self.default_duration)))
+        else:
+            duration = 0
+
+        # 解除禁言
+        self.silence_map.pop(origin, None)
+        self._save_silence_map()
+
+        expiry_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time()))
+        logger.info(f"[Shutup] 🔊 已解除禁言 | 已禁言: {duration}s")
+
+        return self.unshutup_reply.format(duration=duration, expiry_time=expiry_time)
 
     async def terminate(self):
         logger.info("[Shutup] 已卸载插件")
