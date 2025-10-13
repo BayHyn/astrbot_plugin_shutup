@@ -32,5 +32,17 @@
     "type": "bool",
     "description": "是否需要命令前缀",
     "default": true
+  },
+  "scheduled_shutup_enabled": {
+    "type": "bool",
+    "description": "启用定时闭嘴",
+    "hint": "开启后，bot 会在指定时间段内自动保持沉默",
+    "default": false
+  },
+  "scheduled_shutup_times": {
+    "type": "text",
+    "description": "定时闭嘴时间段",
+    "hint": "每行一个时间段，格式: HH:MM-HH:MM (24小时制)\n例如:\n23:00-07:00 (晚11点到早7点)\n12:00-14:00 (中午12点到下午2点)\n支持跨天时间段",
+    "default": "23:00-07:00"
   }
 }
