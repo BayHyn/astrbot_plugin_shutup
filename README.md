@@ -1,4 +1,5 @@
 # AstrBot ShutUp 插件
+![:name](https://count.getloli.com/@astrbot_plugin_shutup?name=astrbot_plugin_shutup&theme=minecraft&padding=6&offset=0&align=top&scale=1&pixelated=1&darkmode=auto)
 
 一个简单的插件，可以让机器人在指定时间内"闭嘴"。
 
