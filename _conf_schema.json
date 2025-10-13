@@ -1,0 +1,48 @@
+{
+  "shutup_commands": {
+    "type": "list",
+    "description": "闭嘴指令列表",
+    "items": { "type": "string" },
+    "default": ["闭嘴", "stop"]
+  },
+  "unshutup_commands": {
+    "type": "list",
+    "description": "解除闭嘴指令列表",
+    "items": { "type": "string" },
+    "default": ["说话", "停止闭嘴"]
+  },
+  "default_duration": {
+    "type": "int",
+    "description": "默认闭嘴时长（秒）",
+    "default": 600
+  },
+  "shutup_reply": {
+    "type": "string",
+    "description": "闭嘴时的回复消息",
+    "hint":"支持占位符 {duration}（禁言时长，秒）和 {expiry_time}（禁言结束时间）" ,
+    "default": "好的，我闭嘴了~"
+  },
+  "unshutup_reply": {
+    "type": "string",
+    "description": "解除闭嘴时的回复消息",
+    "hint": "支持占位符 {duration}（禁言时长，秒）和 {expiry_time}（禁言结束时间）",
+    "default": "好的，我恢复说话了~"
+  },
+  "require_prefix": {
+    "type": "bool",
+    "description": "是否需要命令前缀",
+    "default": true
+  },
+  "scheduled_shutup_enabled": {
+    "type": "bool",
+    "description": "启用定时闭嘴",
+    "hint": "开启后，bot 会在指定时间段内自动保持沉默",
+    "default": false
+  },
+  "scheduled_shutup_times": {
+    "type": "text",
+    "description": "定时闭嘴时间段",
+    "hint": "每行一个时间段，格式: HH:MM-HH:MM (24小时制)\n例如:\n23:00-07:00 (晚11点到早7点)\n12:00-14:00 (中午12点到下午2点)\n支持跨天时间段",
+    "default": "23:00-07:00"
+  }
+}
