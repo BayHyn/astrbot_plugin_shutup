@@ -9,7 +9,11 @@ import json
 from datetime import datetime
 
 
-@register("astrbot_plugin_shutup", "Railgun19457", "一个简单的插件，让bot闭嘴", "v1.2")
+# 插件优先级，在配置加载前先设置默认值
+PLUGIN_PRIORITY = 100
+
+
+@register("astrbot_plugin_shutup", "Railgun19457", "让bot闭嘴,支持指令调用和函数调用，还可以定时\"闭嘴\"", "v1.3")
 class ShutupPlugin(Star):
     # 时间单位转换（秒）
     TIME_UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
@@ -17,6 +21,11 @@ class ShutupPlugin(Star):
     def __init__(self, context: Context, config):
         super().__init__(context)
         self.config = config
+
+        # 从配置读取优先级并更新模块变量
+        global PLUGIN_PRIORITY
+        PLUGIN_PRIORITY = config.get("priority", 100)
+
         self.wake_prefix: list[str] = self.context.get_config().get("wake_prefix", [])
         # 直接获取配置项中的列表
         self.shutup_cmds = config.get("shutup_commands", ["闭嘴", "stop"])
@@ -50,11 +59,11 @@ class ShutupPlugin(Star):
                 [f"{start}-{end}" for start, end in self.scheduled_time_ranges]
             )
             logger.info(
-                f"[Shutup] 已加载 | 指令: {self.shutup_cmds} & {self.unshutup_cmds} | 默认时长: {self.default_duration}s | 定时: {time_ranges_str}"
+                f"[Shutup] 已加载 | 指令: {self.shutup_cmds} & {self.unshutup_cmds} | 默认时长: {self.default_duration}s | 优先级: {PLUGIN_PRIORITY} | 定时: {time_ranges_str}"
             )
         else:
             logger.info(
-                f"[Shutup] 已加载 | 指令: {self.shutup_cmds} & {self.unshutup_cmds} | 默认时长: {self.default_duration}s"
+                f"[Shutup] 已加载 | 指令: {self.shutup_cmds} & {self.unshutup_cmds} | 默认时长: {self.default_duration}s | 优先级: {PLUGIN_PRIORITY}"
             )
 
     def _parse_time_ranges(self, time_text: str) -> list[tuple[str, str]]:
@@ -158,7 +167,7 @@ class ShutupPlugin(Star):
         else:
             return False
 
-    @filter.event_message_type(filter.EventMessageType.ALL)
+    @filter.event_message_type(filter.EventMessageType.ALL, priority=PLUGIN_PRIORITY)
     async def handle_message(self, event: AstrMessageEvent):
         text = event.get_message_str().strip()
         origin = event.unified_msg_origin

@@ -1,5 +1,6 @@
 name: astrbot_plugin_shutup
-desc: 一个简单的插件，让bot闭嘴
-version: v1.2
+display_name: 闭嘴
+desc: 让bot闭嘴,支持指令调用和函数调用，还可以定时"闭嘴"
+version: v1.3
 author: Railgun19457
 repo: https://github.com/railgun19457/astrbot_plugin_shutup

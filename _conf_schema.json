@@ -33,6 +33,12 @@
     "description": "是否需要命令前缀",
     "default": true
   },
+  "priority": {
+    "type": "int",
+    "description": "插件优先级",
+    "hint": "数值越大优先级越高，建议范围 0-100",
+    "default": 100
+  },
   "scheduled_shutup_enabled": {
     "type": "bool",
     "description": "启用定时闭嘴",
