@@ -37,7 +37,7 @@
   "priority": {
     "type": "int",
     "description": "插件优先级",
-    "hint": "数值越大优先级越高",
+    "hint": "数值越大优先级越高,取值范围为int",
     "default": 9223372036854775807
   },
   "scheduled_shutup_enabled": {
