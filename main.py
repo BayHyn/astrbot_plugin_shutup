@@ -6,6 +6,7 @@ import time
 import re
 import os
 import json
+import asyncio
 from datetime import datetime
 from sys import maxsize
 
@@ -14,9 +15,9 @@ from sys import maxsize
 PLUGIN_PRIORITY = maxsize - 1
 
 
-@register("astrbot_plugin_shutup", "Railgun19457", '让bot闭嘴,支持指令调用和函数调用，还可以定时"闭嘴"', "v1.3")
+@register("astrbot_plugin_shutup", "Railgun19457", '让bot闭嘴,支持指令调用和函数调用，支持定时"闭嘴"，支持通过群昵称显示闭嘴状态', "v1.4")
 class ShutupPlugin(Star):
-    # 时间单位转换（秒）
+    # 时间单位转换(秒)
     TIME_UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
 
     def __init__(self, context: Context, config):
@@ -38,10 +39,10 @@ class ShutupPlugin(Star):
         if isinstance(self.unshutup_cmds, str):
             self.unshutup_cmds = re.split(r"[\s,]+", self.unshutup_cmds)
 
-        # 限制 default_duration 范围在 0-86400 秒（0-24小时）
+        # 限制 default_duration 范围在 0-86400 秒(0-24小时)
         duration_config = config.get("default_duration", 600)
         if not isinstance(duration_config, (int, float)) or not (0 <= duration_config <= 86400):
-            logger.warning(f"[Shutup] ⚠️ default_duration 配置无效（{duration_config}），使用默认值 600s")
+            logger.warning(f"[Shutup] ⚠️ default_duration 配置无效({duration_config})，使用默认值 600s")
             self.default_duration = 600
             # 更新配置文件中的值为默认值
             config["default_duration"] = 600
@@ -51,6 +52,15 @@ class ShutupPlugin(Star):
 
         self.shutup_reply = config.get("shutup_reply", "好的，我闭嘴了~")
         self.unshutup_reply = config.get("unshutup_reply", "好的，我恢复说话了~")
+
+        # 群昵称更新配置
+        self.group_card_enabled = config.get("group_card_update_enabled", False)
+        self.group_card_template = config.get(
+            "group_card_template", "[闭嘴中 {remaining}分钟]"
+        )
+        self.original_group_cards = {}  # 存储原始群昵称
+        self.original_nicknames = {}  # 存储原始QQ昵称
+        self._update_task = None  # 定时更新任务
 
         # 定时闭嘴配置
         self.scheduled_enabled = config.get("scheduled_shutup_enabled", False)
@@ -66,6 +76,10 @@ class ShutupPlugin(Star):
         self.silence_map_path = os.path.join(self.data_dir, "silence_map.json")
         self._load_silence_map()
 
+        # 群昵称更新任务(延迟启动)
+        self._update_task = None
+        self._update_task_started = False
+
         if self.scheduled_enabled:
             time_ranges_str = ", ".join(
                 [f"{start}-{end}" for start, end in self.scheduled_time_ranges]
@@ -76,6 +90,11 @@ class ShutupPlugin(Star):
         else:
             logger.info(
                 f"[Shutup] 已加载 | 指令: {self.shutup_cmds} & {self.unshutup_cmds} | 默认时长: {self.default_duration}s | 优先级: {PLUGIN_PRIORITY}"
+            )
+
+        if self.group_card_enabled:
+            logger.info(
+                f"[Shutup] 群昵称更新已启用 | 模板: {self.group_card_template}"
             )
 
     def _parse_time_ranges(self, time_text: str) -> list[tuple[str, str]]:
@@ -160,7 +179,7 @@ class ShutupPlugin(Star):
         """检查消息是否满足前缀要求
 
         Returns:
-            bool: True 表示满足前缀要求（或不需要前缀），False 表示不满足前缀要求
+            bool: True 表示满足前缀要求(或不需要前缀)，False 表示不满足前缀要求
         """
         if not self.require_prefix:
             return True
@@ -179,6 +198,130 @@ class ShutupPlugin(Star):
         else:
             return False
 
+    async def _update_group_card(self, origin: str, remaining_minutes: int) -> None:
+        """更新群昵称显示剩余时长"""
+        if not self.group_card_enabled:
+            return
+
+        # 解析 origin 获取平台和群信息
+        # origin 格式通常为: platform_name.group_id.user_id 或 platform_name.user_id
+        parts = origin.split(".")
+        if len(parts) < 3:
+            return  # 不是群聊消息
+
+        platform_id = parts[0]
+        group_id = parts[1]
+
+        # 获取 bot 实例
+        try:
+            # 通过 context 获取平台管理器
+            platform_mgr = getattr(self.context, "_platform_manager", None)
+            if not platform_mgr:
+                return
+
+            # 查找对应的平台实例
+            bot = None
+            for platform in platform_mgr.platforms:
+                if hasattr(platform, "platform_name") and platform.platform_name == platform_id:
+                    bot = getattr(platform, "bot", None)
+                    break
+
+            if not bot or not hasattr(bot, "call_action"):
+                return
+
+            # 获取 bot 的 QQ 号
+            self_id = getattr(bot, "self_id", None)
+            if not self_id:
+                return
+
+            # 保存原始群昵称和QQ昵称(如果还没保存)
+            if origin not in self.original_group_cards:
+                try:
+                    member_info = await bot.call_action(
+                        "get_group_member_info",
+                        group_id=int(group_id),
+                        user_id=int(self_id),
+                        no_cache=True,
+                    )
+                    # 群昵称(群名片)
+                    self.original_group_cards[origin] = member_info.get("card", "") or ""
+                    # QQ昵称
+                    self.original_nicknames[origin] = member_info.get("nickname", "") or ""
+                    logger.debug(
+                        f"[Shutup] 保存原始信息 | 群昵称: {self.original_group_cards[origin]} | QQ昵称: {self.original_nicknames[origin]}"
+                    )
+                except Exception as e:
+                    logger.debug(f"[Shutup] 获取原始群昵称失败: {e}")
+                    self.original_group_cards[origin] = ""
+                    self.original_nicknames[origin] = ""
+
+            # 格式化群昵称
+            if remaining_minutes > 0:
+                # 获取原始信息用于占位符
+                original_card = self.original_group_cards.get(origin, "")
+                original_nickname = self.original_nicknames.get(origin, "")
+
+                # 使用原始群昵称或QQ昵称(优先使用群昵称)
+                original_name = original_card if original_card else original_nickname
+
+                try:
+                    card = self.group_card_template.format(
+                        remaining=remaining_minutes,
+                        original_card=original_card,
+                        original_nickname=original_nickname,
+                        original_name=original_name,
+                    )
+                except KeyError as e:
+                    logger.warning(f"[Shutup] 群昵称模板占位符错误: {e}，使用默认格式")
+                    card = f"[闭嘴中 {remaining_minutes}分钟]"
+            else:
+                # 恢复原始群昵称
+                card = self.original_group_cards.get(origin, "")
+
+            # 更新群昵称
+            await bot.call_action(
+                "set_group_card",
+                group_id=int(group_id),
+                user_id=int(self_id),
+                card=card[:60],  # QQ 群昵称最长 60 字符
+            )
+            logger.debug(f"[Shutup] 已更新群昵称: {card[:60]}")
+
+        except Exception as e:
+            logger.debug(f"[Shutup] 更新群昵称失败: {e}")
+
+    async def _ensure_update_task_started(self) -> None:
+        """确保群昵称更新任务已启动"""
+        if self.group_card_enabled and not self._update_task_started:
+            self._update_task_started = True
+            self._update_task = asyncio.create_task(self._group_card_update_loop())
+            logger.info("[Shutup] 群昵称更新任务已启动")
+
+    async def _group_card_update_loop(self) -> None:
+        """定时更新群昵称的后台任务"""
+        try:
+            while True:
+                await asyncio.sleep(60)  # 每分钟更新一次
+
+                if not self.silence_map:
+                    continue
+
+                current_time = time.time()
+                for origin, expiry in list(self.silence_map.items()):
+                    remaining_seconds = expiry - current_time
+                    if remaining_seconds > 0:
+                        remaining_minutes = max(1, int(remaining_seconds / 60))
+                        await self._update_group_card(origin, remaining_minutes)
+                    else:
+                        # 过期了，恢复原始群昵称
+                        await self._update_group_card(origin, 0)
+                        self.original_group_cards.pop(origin, None)
+
+        except asyncio.CancelledError:
+            logger.info("[Shutup] 群昵称更新任务已停止")
+        except Exception as e:
+            logger.error(f"[Shutup] 群昵称更新任务异常: {e}")
+
     @filter.event_message_type(filter.EventMessageType.ALL, priority=PLUGIN_PRIORITY)
     async def handle_message(self, event: AstrMessageEvent):
         text = event.get_message_str().strip()
@@ -188,7 +331,7 @@ class ShutupPlugin(Star):
         is_shutup_cmd = any(text.startswith(cmd) for cmd in self.shutup_cmds)
         is_unshutup_cmd = any(text.startswith(cmd) for cmd in self.unshutup_cmds)
 
-        # 2. 处理控制指令（需要检查前缀）
+        # 2. 处理控制指令(需要检查前缀)
         if is_shutup_cmd or is_unshutup_cmd:
             if not self._check_prefix(event):
                 return
@@ -246,6 +389,14 @@ class ShutupPlugin(Star):
         self.silence_map[origin] = time.time() + duration
         self._save_silence_map()
 
+        # 启动群昵称更新任务(如果还没启动)
+        await self._ensure_update_task_started()
+
+        # 立即更新群昵称(如果启用)
+        if self.group_card_enabled:
+            remaining_minutes = max(1, int(duration / 60))
+            await self._update_group_card(origin, remaining_minutes)
+
         expiry_time = time.strftime(
             "%Y-%m-%d %H:%M:%S", time.localtime(self.silence_map[origin])
         )
@@ -267,10 +418,28 @@ class ShutupPlugin(Star):
         self.silence_map.pop(origin, None)
         self._save_silence_map()
 
+        # 恢复原始群昵称(如果启用)
+        if self.group_card_enabled:
+            await self._update_group_card(origin, 0)
+            self.original_group_cards.pop(origin, None)
+
         expiry_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time()))
         logger.info(f"[Shutup] 🔊 已解除禁言 | 已禁言: {duration}s")
 
         return self.unshutup_reply.format(duration=duration, expiry_time=expiry_time)
 
     async def terminate(self):
+        # 停止群昵称更新任务
+        if self._update_task and not self._update_task.done():
+            self._update_task.cancel()
+            try:
+                await self._update_task
+            except asyncio.CancelledError:
+                pass
+
+        # 恢复所有群昵称
+        if self.group_card_enabled and self.original_group_cards:
+            for origin in list(self.original_group_cards.keys()):
+                await self._update_group_card(origin, 0)
+
         logger.info("[Shutup] 已卸载插件")

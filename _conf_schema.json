@@ -13,20 +13,20 @@
   },
   "default_duration": {
     "type": "int",
-    "description": "默认闭嘴时长（秒）",
+    "description": "默认闭嘴时长(秒)",
     "hint": "范围0-86400秒",
     "default": 600
   },
   "shutup_reply": {
     "type": "string",
     "description": "闭嘴时的回复消息",
-    "hint":"支持占位符 {duration}（禁言时长，秒）和 {expiry_time}（禁言结束时间）" ,
+    "hint":"支持占位符 {duration}(禁言时长，秒)和 {expiry_time}(禁言结束时间)" ,
     "default": "好的，我闭嘴了~"
   },
   "unshutup_reply": {
     "type": "string",
     "description": "解除闭嘴时的回复消息",
-    "hint": "支持占位符 {duration}（禁言时长，秒）和 {expiry_time}（禁言结束时间）",
+    "hint": "支持占位符 {duration}(禁言时长，秒)和 {expiry_time}(禁言结束时间)",
     "default": "好的，我恢复说话了~"
   },
   "require_prefix": {
@@ -51,5 +51,17 @@
     "description": "定时闭嘴时间段",
     "hint": "每行一个时间段，格式: HH:MM-HH:MM (24小时制)\n例如:\n23:00-07:00 (晚11点到早7点)\n12:00-14:00 (中午12点到下午2点)\n支持跨天时间段",
     "default": "23:00-07:00"
+  },
+  "group_card_update_enabled": {
+    "type": "bool",
+    "description": "启用群昵称剩余时长显示",
+    "hint": "开启后，bot 在闭嘴期间会修改群昵称显示剩余时长，每分钟更新一次",
+    "default": false
+  },
+  "group_card_template": {
+    "type": "string",
+    "description": "群昵称显示模板",
+    "hint": "支持占位符:\n {remaining} - 剩余分钟数\n {original_card} - 原始群昵称(群名片)\n {original_nickname} - 原始QQ昵称\n {original_name} - 原始名称(优先使用群昵称，若无则使用QQ昵称)",
+    "default": "{original_name}[闭嘴中 {remaining}分钟]"
   }
 }
