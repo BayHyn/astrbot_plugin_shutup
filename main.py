@@ -7,13 +7,14 @@ import re
 import os
 import json
 from datetime import datetime
+from sys import maxsize
 
 
 # 插件优先级，在配置加载前先设置默认值
-PLUGIN_PRIORITY = 100
+PLUGIN_PRIORITY = maxsize - 1
 
 
-@register("astrbot_plugin_shutup", "Railgun19457", "让bot闭嘴,支持指令调用和函数调用，还可以定时\"闭嘴\"", "v1.3")
+@register("astrbot_plugin_shutup", "Railgun19457", '让bot闭嘴,支持指令调用和函数调用，还可以定时"闭嘴"', "v1.3")
 class ShutupPlugin(Star):
     # 时间单位转换（秒）
     TIME_UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
@@ -24,7 +25,7 @@ class ShutupPlugin(Star):
 
         # 从配置读取优先级并更新模块变量
         global PLUGIN_PRIORITY
-        PLUGIN_PRIORITY = config.get("priority", 100)
+        PLUGIN_PRIORITY = config.get("priority", maxsize - 1)
 
         self.wake_prefix: list[str] = self.context.get_config().get("wake_prefix", [])
         # 直接获取配置项中的列表
@@ -36,7 +37,18 @@ class ShutupPlugin(Star):
             self.shutup_cmds = re.split(r"[\s,]+", self.shutup_cmds)
         if isinstance(self.unshutup_cmds, str):
             self.unshutup_cmds = re.split(r"[\s,]+", self.unshutup_cmds)
-        self.default_duration = config.get("default_duration", 600)
+
+        # 限制 default_duration 范围在 0-86400 秒（0-24小时）
+        duration_config = config.get("default_duration", 600)
+        if not isinstance(duration_config, (int, float)) or not (0 <= duration_config <= 86400):
+            logger.warning(f"[Shutup] ⚠️ default_duration 配置无效（{duration_config}），使用默认值 600s")
+            self.default_duration = 600
+            # 更新配置文件中的值为默认值
+            config["default_duration"] = 600
+            config.save_config()
+        else:
+            self.default_duration = int(duration_config)
+
         self.shutup_reply = config.get("shutup_reply", "好的，我闭嘴了~")
         self.unshutup_reply = config.get("unshutup_reply", "好的，我恢复说话了~")
 

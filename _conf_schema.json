@@ -14,6 +14,7 @@
   "default_duration": {
     "type": "int",
     "description": "默认闭嘴时长（秒）",
+    "hint": "范围0-86400秒",
     "default": 600
   },
   "shutup_reply": {
@@ -36,8 +37,8 @@
   "priority": {
     "type": "int",
     "description": "插件优先级",
-    "hint": "数值越大优先级越高，建议范围 0-100",
-    "default": 100
+    "hint": "数值越大优先级越高",
+    "default": 9223372036854775807
   },
   "scheduled_shutup_enabled": {
     "type": "bool",
