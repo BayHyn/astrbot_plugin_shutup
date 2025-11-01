@@ -375,6 +375,7 @@ class ShutupPlugin(Star):
                 logger.info("[Shutup] ⏰ 禁言已自动过期")
                 self.silence_map.pop(origin, None)
                 self._save_silence_map()
+                return
 
     async def _handle_shutup_command(self, event: AstrMessageEvent, text: str, origin: str) -> str:
         """处理闭嘴指令"""
