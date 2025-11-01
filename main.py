@@ -60,6 +60,7 @@ class ShutupPlugin(Star):
         )
         self.original_group_cards = {}  # 存储原始群昵称
         self.original_nicknames = {}  # 存储原始QQ昵称
+        self.origin_to_event_map = {}  # 存储 origin 到 event 的映射
         self._update_task = None  # 定时更新任务
 
         # 定时闭嘴配置
@@ -198,42 +199,39 @@ class ShutupPlugin(Star):
         else:
             return False
 
-    async def _update_group_card(self, origin: str, remaining_minutes: int) -> None:
+    async def _update_group_card(self, event: AstrMessageEvent, origin: str, remaining_minutes: int) -> None:
         """更新群昵称显示剩余时长"""
         if not self.group_card_enabled:
             return
 
-        # 解析 origin 获取平台和群信息
-        # origin 格式通常为: platform_name.group_id.user_id 或 platform_name.user_id
-        parts = origin.split(".")
-        if len(parts) < 3:
-            return  # 不是群聊消息
+        # 只处理 aiocqhttp 平台的事件
+        try:
+            from astrbot.core.platform.sources.aiocqhttp.aiocqhttp_message_event import (
+                AiocqhttpMessageEvent,
+            )
+            if not isinstance(event, AiocqhttpMessageEvent):
+                return
+        except ImportError:
+            logger.debug("[Shutup] aiocqhttp 模块未安装，跳过群昵称更新")
+            return
 
-        platform_id = parts[0]
-        group_id = parts[1]
+        # 检查是否是群聊
+        group_id = event.get_group_id()
+        if not group_id:
+            return
 
         # 获取 bot 实例
+        bot = getattr(event, "bot", None)
+        if not bot or not hasattr(bot, "call_action"):
+            logger.debug("[Shutup] bot 不支持 call_action，跳过群昵称更新")
+            return
+
+        # 获取 bot 的 QQ 号
+        self_id = event.get_self_id()
+        if not self_id:
+            return
+
         try:
-            # 通过 context 获取平台管理器
-            platform_mgr = getattr(self.context, "_platform_manager", None)
-            if not platform_mgr:
-                return
-
-            # 查找对应的平台实例
-            bot = None
-            for platform in platform_mgr.platforms:
-                if hasattr(platform, "platform_name") and platform.platform_name == platform_id:
-                    bot = getattr(platform, "bot", None)
-                    break
-
-            if not bot or not hasattr(bot, "call_action"):
-                return
-
-            # 获取 bot 的 QQ 号
-            self_id = getattr(bot, "self_id", None)
-            if not self_id:
-                return
-
             # 保存原始群昵称和QQ昵称(如果还没保存)
             if origin not in self.original_group_cards:
                 try:
@@ -285,10 +283,10 @@ class ShutupPlugin(Star):
                 user_id=int(self_id),
                 card=card[:60],  # QQ 群昵称最长 60 字符
             )
-            logger.debug(f"[Shutup] 已更新群昵称: {card[:60]}")
+            logger.info(f"[Shutup] 已更新群昵称: {card[:60]}")
 
         except Exception as e:
-            logger.debug(f"[Shutup] 更新群昵称失败: {e}")
+            logger.warning(f"[Shutup] 更新群昵称失败: {e}")
 
     async def _ensure_update_task_started(self) -> None:
         """确保群昵称更新任务已启动"""
@@ -311,11 +309,18 @@ class ShutupPlugin(Star):
                     remaining_seconds = expiry - current_time
                     if remaining_seconds > 0:
                         remaining_minutes = max(1, int(remaining_seconds / 60))
-                        await self._update_group_card(origin, remaining_minutes)
+                        # 从映射中获取 event
+                        event = self.origin_to_event_map.get(origin)
+                        if event:
+                            await self._update_group_card(event, origin, remaining_minutes)
                     else:
                         # 过期了，恢复原始群昵称
-                        await self._update_group_card(origin, 0)
+                        event = self.origin_to_event_map.get(origin)
+                        if event:
+                            await self._update_group_card(event, origin, 0)
                         self.original_group_cards.pop(origin, None)
+                        self.original_nicknames.pop(origin, None)
+                        self.origin_to_event_map.pop(origin, None)
 
         except asyncio.CancelledError:
             logger.info("[Shutup] 群昵称更新任务已停止")
@@ -338,13 +343,13 @@ class ShutupPlugin(Star):
 
             if is_shutup_cmd:
                 yield event.plain_result(
-                    await self._handle_shutup_command(text, origin)
+                    await self._handle_shutup_command(event, text, origin)
                 )
                 event.stop_event()
                 return
 
             if is_unshutup_cmd:
-                yield event.plain_result(await self._handle_unshutup_command(origin))
+                yield event.plain_result(await self._handle_unshutup_command(event, origin))
                 event.stop_event()
                 return
 
@@ -371,7 +376,7 @@ class ShutupPlugin(Star):
                 self.silence_map.pop(origin, None)
                 self._save_silence_map()
 
-    async def _handle_shutup_command(self, text: str, origin: str) -> str:
+    async def _handle_shutup_command(self, event: AstrMessageEvent, text: str, origin: str) -> str:
         """处理闭嘴指令"""
         # 解析时长
         for cmd in self.shutup_cmds:
@@ -389,13 +394,16 @@ class ShutupPlugin(Star):
         self.silence_map[origin] = time.time() + duration
         self._save_silence_map()
 
+        # 保存 event 到映射（用于后台更新）
+        self.origin_to_event_map[origin] = event
+
         # 启动群昵称更新任务(如果还没启动)
         await self._ensure_update_task_started()
 
         # 立即更新群昵称(如果启用)
         if self.group_card_enabled:
             remaining_minutes = max(1, int(duration / 60))
-            await self._update_group_card(origin, remaining_minutes)
+            await self._update_group_card(event, origin, remaining_minutes)
 
         expiry_time = time.strftime(
             "%Y-%m-%d %H:%M:%S", time.localtime(self.silence_map[origin])
@@ -404,7 +412,7 @@ class ShutupPlugin(Star):
 
         return self.shutup_reply.format(duration=duration, expiry_time=expiry_time)
 
-    async def _handle_unshutup_command(self, origin: str) -> str:
+    async def _handle_unshutup_command(self, event: AstrMessageEvent, origin: str) -> str:
         """处理解除闭嘴指令"""
         # 计算已禁言时长
         old_expiry = self.silence_map.get(origin)
@@ -420,8 +428,10 @@ class ShutupPlugin(Star):
 
         # 恢复原始群昵称(如果启用)
         if self.group_card_enabled:
-            await self._update_group_card(origin, 0)
+            await self._update_group_card(event, origin, 0)
             self.original_group_cards.pop(origin, None)
+            self.original_nicknames.pop(origin, None)
+            self.origin_to_event_map.pop(origin, None)
 
         expiry_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time()))
         logger.info(f"[Shutup] 🔊 已解除禁言 | 已禁言: {duration}s")
@@ -440,6 +450,8 @@ class ShutupPlugin(Star):
         # 恢复所有群昵称
         if self.group_card_enabled and self.original_group_cards:
             for origin in list(self.original_group_cards.keys()):
-                await self._update_group_card(origin, 0)
+                event = self.origin_to_event_map.get(origin)
+                if event:
+                    await self._update_group_card(event, origin, 0)
 
         logger.info("[Shutup] 已卸载插件")
